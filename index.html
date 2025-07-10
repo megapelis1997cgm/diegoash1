@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Herramienta de Acotación de Imágenes (Corregida)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        #canvas-container.dragover {
+            border-style: dashed;
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+        canvas {
+            cursor: crosshair;
+            border-radius: 0.5rem;
+        }
+        .custom-button {
+            transition: all 0.2s ease-in-out;
+        }
+        .custom-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Modal Styles */
+        #modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+        }
+        #modal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-6xl bg-white p-6 rounded-xl shadow-lg relative">
+        <div class="text-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-800">Herramienta de Acotación de Imágenes</h1>
+            <p class="text-gray-500 mt-2">Arrastra una imagen al recuadro o usa el botón. Luego, dibuja líneas para acotar.</p>
+        </div>
+
+        <!-- Controls -->
+        <div class="flex flex-wrap items-center justify-center gap-4 mb-6 p-4 bg-gray-50 rounded-lg">
+            <input type="file" id="imageLoader" class="hidden"/>
+            <button onclick="document.getElementById('imageLoader').click()" class="custom-button bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg">
+                Cargar Imagen
+            </button>
+            <div>
+                <label for="lineColor" class="text-sm font-medium text-gray-700">Color:</label>
+                <input type="color" id="lineColor" value="#000000" class="w-10 h-10 rounded-md border border-gray-300 cursor-pointer align-middle">
+            </div>
+            <button id="downloadBtn" class="custom-button bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg">
+                Descargar JPG (1000x1000)
+            </button>
+             <button id="clearBtn" class="custom-button bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg">
+                Borrar Todo
+            </button>
+        </div>
+
+        <!-- Canvas Container -->
+        <div id="canvas-container" class="w-full h-[60vh] flex items-center justify-center bg-gray-200 rounded-lg overflow-hidden border-2 border-transparent transition-colors">
+            <canvas id="canvas"></canvas>
+        </div>
+        
+        <!-- Instructions -->
+        <div class="mt-6 text-center text-sm text-gray-600">
+            <p><strong class="font-semibold">Dibujar:</strong> Haz clic y arrastra. <strong class="font-semibold">Mantén Shift</strong> para alinear horizontal o verticalmente.</p>
+            <p><strong class="font-semibold">Mover:</strong> Arrastra cualquier parte de una cota para moverla. <strong class="font-semibold">Doble Clic:</strong> Elimina una cota.</p>
+        </div>
+
+        <!-- Custom Modal -->
+        <div id="modal-overlay" class="hidden">
+            <div id="modal" class="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm">
+                <h3 id="modal-title" class="text-lg font-medium leading-6 text-gray-900 mb-4"></h3>
+                <div id="modal-input-container">
+                    <label for="modal-input" class="block text-sm font-medium text-gray-700">Texto de la medida:</label>
+                    <input type="text" id="modal-input" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                </div>
+                <div id="modal-buttons" class="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
+                    <button id="modal-ok" type="button" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none sm:col-start-2 sm:text-sm">OK</button>
+                    <button id="modal-cancel" type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:col-start-1 sm:text-sm">Cancelar</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // Canvas and DOM elements
+        const canvasContainer = document.getElementById('canvas-container');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const imageLoader = document.getElementById('imageLoader');
+        const lineColorInput = document.getElementById('lineColor');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        
+        // Modal elements
+        const modalOverlay = document.getElementById('modal-overlay');
+        const modalTitle = document.getElementById('modal-title');
+        const modalInputContainer = document.getElementById('modal-input-container');
+        const modalInput = document.getElementById('modal-input');
+        const modalOkBtn = document.getElementById('modal-ok');
+        const modalCancelBtn = document.getElementById('modal-cancel');
+
+        // App state
+        let backgroundImage = null;
+        let dimensions = [];
+        let isDrawing = false;
+        let isDragging = false;
+        let currentDimension = null;
+        let selectedDimension = null;
+        let dragOffsetX, dragOffsetY;
+        let modalConfirmCallback = null;
+
+        // --- App Initialization ---
+        function initialize() {
+            fitCanvasToContainer();
+            addEventListeners();
+        }
+
+        function fitCanvasToContainer() {
+            const style = getComputedStyle(canvasContainer);
+            canvas.width = parseInt(style.width, 10);
+            canvas.height = parseInt(style.height, 10);
+            redrawCanvas();
+        }
+
+        function addEventListeners() {
+            window.addEventListener('resize', fitCanvasToContainer);
+            imageLoader.addEventListener('change', (e) => handleFile(e.target.files[0]), false);
+            downloadBtn.addEventListener('click', downloadImage);
+            clearBtn.addEventListener('click', () => {
+                showConfirmationModal('¿Estás seguro de que quieres borrar todas las acotaciones?', () => {
+                    dimensions = [];
+                    redrawCanvas();
+                });
+            });
+            
+            // Drag and Drop Listeners
+            canvasContainer.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); canvasContainer.classList.add('dragover'); });
+            canvasContainer.addEventListener('dragleave', e => { e.preventDefault(); e.stopPropagation(); canvasContainer.classList.remove('dragover'); });
+            canvasContainer.addEventListener('drop', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                canvasContainer.classList.remove('dragover');
+                handleFile(e.dataTransfer.files[0]);
+            });
+
+            // Mouse Listeners
+            canvas.addEventListener('mousedown', onMouseDown);
+            canvas.addEventListener('mousemove', onMouseMove);
+            canvas.addEventListener('mouseup', onMouseUp);
+            canvas.addEventListener('dblclick', onDoubleClick);
+
+            // Modal Listeners
+            modalOkBtn.addEventListener('click', onModalOk);
+            modalCancelBtn.addEventListener('click', hideModal);
+            modalOverlay.addEventListener('click', (e) => { if(e.target === modalOverlay) hideModal(); });
+        }
+
+        // --- File Handling ---
+        function handleFile(file) {
+            if (!file || !file.type.match('image.*')) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                backgroundImage = new Image();
+                backgroundImage.onload = () => fitCanvasToContainer();
+                backgroundImage.src = event.target.result;
+            }
+            reader.readAsDataURL(file);
+        }
+
+        // --- Core Drawing ---
+        function redrawCanvas() {
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (backgroundImage) {
+                const hRatio = canvas.width / backgroundImage.width;
+                const vRatio = canvas.height / backgroundImage.height;
+                const ratio = Math.min(hRatio, vRatio);
+                const centerShiftX = (canvas.width - backgroundImage.width * ratio) / 2;
+                const centerShiftY = (canvas.height - backgroundImage.height * ratio) / 2;
+                ctx.drawImage(backgroundImage, 0, 0, backgroundImage.width, backgroundImage.height,
+                    centerShiftX, centerShiftY, backgroundImage.width * ratio, backgroundImage.height * ratio);
+            } else {
+                ctx.fillStyle = '#9CA3AF';
+                ctx.font = '16px Inter';
+                ctx.textAlign = 'center';
+                ctx.fillText('Arrastra una imagen aquí para comenzar', canvas.width / 2, canvas.height / 2);
+            }
+
+            dimensions.forEach(dim => {
+                drawDimensionLine(ctx, dim.line, dim.text);
+                drawText(ctx, dim.text);
+            });
+        }
+
+        // --- Mouse Events ---
+        function onMouseDown(e) {
+            const { x, y } = getMousePos(e);
+            selectedDimension = getDimensionAt(x, y);
+
+            if (selectedDimension) {
+                isDragging = true;
+                dragOffsetX = x;
+                dragOffsetY = y;
+            } else {
+                isDrawing = true;
+                currentDimension = {
+                    id: Date.now(),
+                    line: { x1: x, y1: y, x2: x, y2: y, color: lineColorInput.value },
+                    text: null
+                };
+            }
+        }
+
+        function onMouseMove(e) {
+            const { x, y } = getMousePos(e);
+            if (isDrawing && currentDimension) {
+                let endX = x;
+                let endY = y;
+
+                // Restore Shift key functionality
+                if (e.shiftKey) {
+                    const startX = currentDimension.line.x1;
+                    const startY = currentDimension.line.y1;
+                    if (Math.abs(x - startX) > Math.abs(y - startY)) {
+                        endY = startY; // Snap to horizontal
+                    } else {
+                        endX = startX; // Snap to vertical
+                    }
+                }
+
+                currentDimension.line.x2 = endX;
+                currentDimension.line.y2 = endY;
+                
+                redrawCanvas();
+                drawDimensionLine(ctx, currentDimension.line, null); // Draw unbroken line while drawing
+            } else if (isDragging && selectedDimension) {
+                const dx = x - dragOffsetX;
+                const dy = y - dragOffsetY;
+                selectedDimension.line.x1 += dx;
+                selectedDimension.line.y1 += dy;
+                selectedDimension.line.x2 += dx;
+                selectedDimension.line.y2 += dy;
+                selectedDimension.text.x += dx;
+                selectedDimension.text.y += dy;
+                dragOffsetX = x;
+                dragOffsetY = y;
+                redrawCanvas();
+            }
+            canvas.style.cursor = getDimensionAt(x, y) ? 'move' : 'crosshair';
+        }
+
+        function onMouseUp(e) {
+            if (isDrawing && currentDimension) {
+                const { x, y } = getMousePos(e);
+                
+                // Use the final coordinates after potential shift-snapping
+                const finalX = currentDimension.line.x2;
+                const finalY = currentDimension.line.y2;
+                
+                if (Math.hypot(currentDimension.line.x1 - finalX, currentDimension.line.y1 - finalY) > 5) {
+                    showInputModal('Introduce la medida', (textContent) => {
+                        if (textContent) {
+                            currentDimension.text = createTextForLine(currentDimension.line, textContent);
+                            dimensions.push(currentDimension);
+                        }
+                        currentDimension = null;
+                        redrawCanvas();
+                    });
+                } else {
+                    currentDimension = null;
+                    redrawCanvas();
+                }
+            }
+            isDrawing = false;
+            isDragging = false;
+            selectedDimension = null;
+        }
+
+        function onDoubleClick(e) {
+            const { x, y } = getMousePos(e);
+            const dimToDelete = getDimensionAt(x, y);
+            if (dimToDelete) {
+                dimensions = dimensions.filter(dim => dim.id !== dimToDelete.id);
+                redrawCanvas();
+            }
+        }
+
+        // --- Modal Logic ---
+        function showInputModal(title, onConfirm) {
+            modalTitle.textContent = title;
+            modalInputContainer.classList.remove('hidden');
+            modalInput.value = '100mm';
+            modalOverlay.classList.remove('hidden');
+            modalInput.focus();
+            modalInput.select();
+            modalConfirmCallback = onConfirm;
+        }
+
+        function showConfirmationModal(title, onConfirm) {
+            modalTitle.textContent = title;
+            modalInputContainer.classList.add('hidden');
+            modalOverlay.classList.remove('hidden');
+            modalConfirmCallback = onConfirm;
+        }
+
+        function hideModal() {
+            modalOverlay.classList.add('hidden');
+            modalConfirmCallback = null;
+        }
+
+        function onModalOk() {
+            if (modalConfirmCallback) {
+                const value = modalInputContainer.classList.contains('hidden') ? true : modalInput.value;
+                modalConfirmCallback(value);
+            }
+            hideModal();
+        }
+
+        // --- Drawing Helpers ---
+        function drawDimensionLine(context, line, text) {
+            context.strokeStyle = line.color;
+            context.lineWidth = 2;
+            const angle = Math.atan2(line.y2 - line.y1, line.x2 - line.x1);
+            const barLength = 12;
+
+            // If there is text, draw a gap in the line. Otherwise, draw a continuous line.
+            if (text) {
+                context.font = '16px Inter';
+                const textWidth = context.measureText(text.text).width;
+                const padding = 16;
+                const gap = textWidth + padding;
+
+                const totalLength = Math.hypot(line.x2 - line.x1, line.y2 - line.y1);
+                const midPoint = totalLength / 2;
+
+                if (gap < totalLength) {
+                    const gapStart = midPoint - gap / 2;
+                    const gapEnd = midPoint + gap / 2;
+
+                    const p1 = { x: line.x1, y: line.y1 };
+                    const p2 = { x: line.x1 + gapStart * Math.cos(angle), y: line.y1 + gapStart * Math.sin(angle) };
+                    const p3 = { x: line.x1 + gapEnd * Math.cos(angle), y: line.y1 + gapEnd * Math.sin(angle) };
+                    const p4 = { x: line.x2, y: line.y2 };
+
+                    context.beginPath();
+                    context.moveTo(p1.x, p1.y);
+                    context.lineTo(p2.x, p2.y);
+                    context.stroke();
+
+                    context.beginPath();
+                    context.moveTo(p3.x, p3.y);
+                    context.lineTo(p4.x, p4.y);
+                    context.stroke();
+                } else {
+                    // If the line is shorter than the text, draw a continuous line behind it
+                    context.beginPath();
+                    context.moveTo(line.x1, line.y1);
+                    context.lineTo(line.x2, line.y2);
+                    context.stroke();
+                }
+            } else {
+                context.beginPath();
+                context.moveTo(line.x1, line.y1);
+                context.lineTo(line.x2, line.y2);
+                context.stroke();
+            }
+
+            const drawBar = (x, y) => {
+                const barAngle = angle + Math.PI / 2;
+                const x_start = x - (barLength / 2) * Math.cos(barAngle);
+                const y_start = y - (barLength / 2) * Math.sin(barAngle);
+                const x_end = x + (barLength / 2) * Math.cos(barAngle);
+                const y_end = y + (barLength / 2) * Math.sin(barAngle);
+                context.beginPath();
+                context.moveTo(x_start, y_start);
+                context.lineTo(x_end, y_end);
+                context.stroke();
+            };
+            drawBar(line.x1, line.y1);
+            drawBar(line.x2, line.y2);
+        }
+
+        function drawText(context, shape) {
+            context.save();
+            context.translate(shape.x, shape.y);
+            context.rotate(shape.angle);
+            context.font = '16px Inter';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillStyle = shape.color;
+            context.fillText(shape.text, 0, 0);
+            context.restore();
+        }
+
+        // --- Utility Functions ---
+        function getMousePos(evt) {
+            const rect = canvas.getBoundingClientRect();
+            return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+        }
+
+        function getDimensionAt(x, y) {
+            for (let i = dimensions.length - 1; i >= 0; i--) {
+                const dim = dimensions[i];
+                const dist = distToSegment(x, y, dim.line.x1, dim.line.y1, dim.line.x2, dim.line.y2);
+                if (dist < 15) return dim;
+            }
+            return null;
+        }
+
+        function createTextForLine(line, textContent) {
+            const angle = Math.atan2(line.y2 - line.y1, line.x2 - line.x1);
+            return {
+                text: textContent,
+                x: (line.x1 + line.x2) / 2,
+                y: (line.y1 + line.y2) / 2,
+                color: line.color,
+                angle: (angle > Math.PI / 2 || angle < -Math.PI / 2) ? angle + Math.PI : angle,
+            };
+        }
+
+        function downloadImage() {
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = 1000;
+            tempCanvas.height = 1000;
+
+            tempCtx.fillStyle = 'white';
+            tempCtx.fillRect(0, 0, 1000, 1000);
+
+            if (backgroundImage) {
+                const imgScale = Math.min(1000 / backgroundImage.width, 1000 / backgroundImage.height);
+                const imgW = backgroundImage.width * imgScale;
+                const imgH = backgroundImage.height * imgScale;
+                const imgX = (1000 - imgW) / 2;
+                const imgY = (1000 - imgH) / 2;
+                tempCtx.drawImage(backgroundImage, imgX, imgY, imgW, imgH);
+                
+                const canvasRatio = Math.min(canvas.width / backgroundImage.width, canvas.height / backgroundImage.height);
+                const canvasImageW = backgroundImage.width * canvasRatio;
+                const canvasImageH = backgroundImage.height * canvasRatio;
+                const centerShiftX = (canvas.width - canvasImageW) / 2;
+                const centerShiftY = (canvas.height - canvasImageH) / 2;
+                const canvasToImageScale = imgW / canvasImageW;
+
+                dimensions.forEach(dim => {
+                    const scaledLine = {
+                        x1: (dim.line.x1 - centerShiftX) * canvasToImageScale + imgX,
+                        y1: (dim.line.y1 - centerShiftY) * canvasToImageScale + imgY,
+                        x2: (dim.line.x2 - centerShiftX) * canvasToImageScale + imgX,
+                        y2: (dim.line.y2 - centerShiftY) * canvasToImageScale + imgY,
+                        color: dim.line.color
+                    };
+                    const scaledText = {
+                        ...dim.text,
+                        x: (dim.text.x - centerShiftX) * canvasToImageScale + imgX,
+                        y: (dim.text.y - centerShiftY) * canvasToImageScale + imgY,
+                    };
+                    drawDimensionLine(tempCtx, scaledLine, scaledText);
+                    drawText(tempCtx, scaledText);
+                });
+            }
+
+            const link = document.createElement('a');
+            link.download = 'imagen-acotada.jpg';
+            link.href = tempCanvas.toDataURL('image/jpeg', 0.9);
+            link.click();
+        }
+
+        function distToSegment(px, py, x1, y1, x2, y2) {
+            const l2 = (x1 - x2) ** 2 + (y1 - y2) ** 2;
+            if (l2 === 0) return Math.hypot(px - x1, py - y1);
+            let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+            t = Math.max(0, Math.min(1, t));
+            const projX = x1 + t * (x2 - x1);
+            const projY = y1 + t * (y2 - y1);
+            return Math.hypot(px - projX, py - projY);
+        }
+
+        // Start the application
+        initialize();
+    </script>
+</body>
+</html>
