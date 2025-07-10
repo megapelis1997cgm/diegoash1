@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Herramienta de Acotación y Dibujo</title>
+    <title>Herramienta de Acotación, Dibujo y Collage</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body {
             font-family: 'Inter', sans-serif;
         }
-        #canvas-container.dragover {
+        #canvas-container.dragover, .collage-zone.dragover {
             border-style: dashed;
             border-color: #3b82f6;
             background-color: #eff6ff;
@@ -30,6 +30,19 @@
             background-color: #1d4ed8;
             color: white;
             cursor: default;
+        }
+        .collage-zone {
+            cursor: pointer;
+        }
+        .collage-zone img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            cursor: grab;
+            pointer-events: auto;
+        }
+        .collage-zone img:active {
+            cursor: grabbing;
         }
         /* Modal Styles */
         #modal-overlay {
@@ -60,14 +73,15 @@
 
         <!-- Controls -->
         <div class="flex flex-wrap items-center justify-center gap-4 mb-6 p-4 bg-gray-50 rounded-lg">
-            <button onclick="document.getElementById('imageLoader').click()" class="custom-button bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg">
+            <button id="mainUploadBtn" class="custom-button bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg">
                 Cargar Imagen
             </button>
-            <input type="file" id="imageLoader" class="hidden"/>
+            <input type="file" id="imageLoader" class="hidden" multiple/>
             
             <div class="flex items-center gap-2 p-2 rounded-lg bg-gray-200">
                  <button id="dimensionToolBtn" class="tool-button custom-button bg-white hover:bg-gray-100 text-gray-800 font-semibold py-2 px-4 rounded-md shadow-sm">Acotación</button>
                  <button id="brushToolBtn" class="tool-button custom-button bg-white hover:bg-gray-100 text-gray-800 font-semibold py-2 px-4 rounded-md shadow-sm">Pincel</button>
+                 <button id="collageToolBtn" class="tool-button custom-button bg-white hover:bg-gray-100 text-gray-800 font-semibold py-2 px-4 rounded-md shadow-sm">Collage</button>
             </div>
             
             <div>
@@ -92,11 +106,26 @@
         <div id="canvas-container" class="w-full h-[60vh] flex items-center justify-center bg-gray-200 rounded-lg overflow-hidden border-2 border-transparent transition-colors">
             <canvas id="canvas"></canvas>
         </div>
+
+        <!-- Collage Container -->
+        <div id="collage-container" class="hidden w-full grid grid-cols-2 grid-rows-2 gap-2 h-[60vh]">
+            <div id="zone-1" class="collage-zone bg-gray-200 rounded-lg flex items-center justify-center text-center p-2">
+                <span class="text-gray-500 pointer-events-none">Haz clic o arrastra una imagen aquí</span>
+            </div>
+            <div id="zone-2" class="collage-zone bg-gray-200 rounded-lg flex items-center justify-center text-center p-2">
+                <span class="text-gray-500 pointer-events-none">Haz clic o arrastra una imagen aquí</span>
+            </div>
+            <div id="zone-3" class="collage-zone bg-gray-200 rounded-lg flex items-center justify-center text-center p-2">
+                <span class="text-gray-500 pointer-events-none">Haz clic o arrastra una imagen aquí</span>
+            </div>
+            <div id="zone-4" class="collage-zone bg-gray-200 rounded-lg flex items-center justify-center text-center p-2">
+                <span class="text-gray-500 pointer-events-none">Haz clic o arrastra una imagen aquí</span>
+            </div>
+        </div>
         
         <!-- Instructions -->
-        <div class="mt-6 text-center text-sm text-gray-600">
-            <p><strong class="font-semibold">Acotación:</strong> Haz clic y arrastra. <strong class="font-semibold">Mantén Shift</strong> para alinear.</p>
-            <p><strong class="font-semibold">Pincel:</strong> Arrastra para pintar. <strong class="font-semibold">Shift + Clic</strong> en 2 puntos para línea recta.</p>
+        <div id="instructions" class="mt-6 text-center text-sm text-gray-600">
+            <!-- Instructions will be dynamically set here -->
         </div>
 
         <!-- Custom Modal -->
@@ -116,19 +145,23 @@
     </div>
 
     <script>
-        // Canvas and DOM elements
+        // DOM elements
         const canvasContainer = document.getElementById('canvas-container');
+        const collageContainer = document.getElementById('collage-container');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const imageLoader = document.getElementById('imageLoader');
+        const mainUploadBtn = document.getElementById('mainUploadBtn');
         const lineColorInput = document.getElementById('lineColor');
         const downloadBtn = document.getElementById('downloadBtn');
         const clearBtn = document.getElementById('clearBtn');
         const dimensionToolBtn = document.getElementById('dimensionToolBtn');
         const brushToolBtn = document.getElementById('brushToolBtn');
+        const collageToolBtn = document.getElementById('collageToolBtn');
         const brushControls = document.getElementById('brushControls');
         const brushSizeInput = document.getElementById('brushSize');
         const brushSizeValue = document.getElementById('brushSizeValue');
+        const instructions = document.getElementById('instructions');
         
         const modalOverlay = document.getElementById('modal-overlay');
         const modalTitle = document.getElementById('modal-title');
@@ -151,6 +184,8 @@
         let brushLineStartPoint = null;
         let lastMousePosition = { x: 0, y: 0 };
         let modalConfirmCallback = null;
+        let draggedImage = null;
+        let clickedCollageZone = null;
 
         function initialize() {
             fitCanvasToContainer();
@@ -167,21 +202,37 @@
 
         function addEventListeners() {
             window.addEventListener('resize', fitCanvasToContainer);
-            imageLoader.addEventListener('change', (e) => handleFile(e.target.files[0]), false);
+            
+            mainUploadBtn.addEventListener('click', () => {
+                clickedCollageZone = null;
+                imageLoader.click();
+            });
+
+            imageLoader.addEventListener('change', handleImageUpload);
+
             downloadBtn.addEventListener('click', downloadImage);
             clearBtn.addEventListener('click', () => {
-                showConfirmationModal('¿Borrar todas las cotas y dibujos?', () => {
-                    dimensions = [];
-                    paintStrokes = [];
-                    redrawCanvas();
+                const clearMessage = currentTool === 'collage' ? '¿Borrar todas las imágenes del collage?' : '¿Borrar todas las cotas y dibujos?';
+                showConfirmationModal(clearMessage, () => {
+                    if (currentTool === 'collage') {
+                        document.querySelectorAll('.collage-zone').forEach(zone => {
+                            zone.innerHTML = '<span class="text-gray-500 pointer-events-none">Haz clic o arrastra una imagen aquí</span>';
+                        });
+                    } else {
+                        dimensions = [];
+                        paintStrokes = [];
+                        redrawCanvas();
+                    }
                 });
             });
             
             dimensionToolBtn.addEventListener('click', () => setTool('dimension'));
             brushToolBtn.addEventListener('click', () => setTool('brush'));
+            collageToolBtn.addEventListener('click', () => setTool('collage'));
+            
             brushSizeInput.addEventListener('input', (e) => {
                 brushSizeValue.textContent = e.target.value;
-                redrawCanvas(); // Update cursor size preview
+                redrawCanvas();
             });
 
             canvasContainer.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); canvasContainer.classList.add('dragover'); });
@@ -190,7 +241,20 @@
                 e.preventDefault();
                 e.stopPropagation();
                 canvasContainer.classList.remove('dragover');
-                handleFile(e.dataTransfer.files[0]);
+                handleImageUpload(e);
+            });
+
+            // Collage Zone Listeners
+            document.querySelectorAll('.collage-zone').forEach(zone => {
+                zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+                zone.addEventListener('dragleave', e => { e.preventDefault(); zone.classList.remove('dragover'); });
+                zone.addEventListener('drop', handleCollageDrop);
+                zone.addEventListener('click', function(e) {
+                    if (e.target.tagName !== 'IMG') {
+                        clickedCollageZone = this;
+                        imageLoader.click();
+                    }
+                });
             });
 
             canvas.addEventListener('mousedown', onMouseDown);
@@ -199,7 +263,7 @@
             canvas.addEventListener('mouseleave', () => {
                 lastMousePosition = { x: 0, y: 0 };
                 if (currentTool === 'brush') redrawCanvas();
-                onMouseUp(); // Finalize any ongoing drawing
+                onMouseUp();
             });
             canvas.addEventListener('dblclick', onDoubleClick);
 
@@ -210,36 +274,79 @@
 
         function setTool(tool) {
             currentTool = tool;
-            brushLineStartPoint = null; // Reset line drawing on tool change
-            if (tool === 'dimension') {
-                dimensionToolBtn.classList.add('active');
-                brushToolBtn.classList.remove('active');
-                brushControls.classList.add('hidden');
-                canvas.style.cursor = 'crosshair';
-                lineColorInput.value = '#000000'; // Default to black for dimensions
-            } else if (tool === 'brush') {
-                brushToolBtn.classList.add('active');
-                dimensionToolBtn.classList.remove('active');
-                brushControls.classList.remove('hidden');
-                brushControls.classList.add('flex');
-                canvas.style.cursor = 'none'; // Use custom cursor
-                lineColorInput.value = '#FFFFFF'; // Default to white for brush
-            }
+            brushLineStartPoint = null;
+            
+            const tools = {
+                dimension: { btn: dimensionToolBtn, canvasVisible: true, collageVisible: false, brushVisible: false, color: '#000000', cursor: 'crosshair', instructions: '<p><strong class="font-semibold">Acotación:</strong> Haz clic y arrastra. <strong class="font-semibold">Mantén Shift</strong> para alinear.</p><p><strong class="font-semibold">Mover:</strong> Arrastra una cota. <strong class="font-semibold">Doble Clic:</strong> Elimina una cota.</p>' },
+                brush: { btn: brushToolBtn, canvasVisible: true, collageVisible: false, brushVisible: true, color: '#FFFFFF', cursor: 'none', instructions: '<p><strong class="font-semibold">Pincel:</strong> Arrastra para pintar. <strong class="font-semibold">Shift + Clic</strong> en 2 puntos para línea recta.</p>' },
+                collage: { btn: collageToolBtn, canvasVisible: false, collageVisible: true, brushVisible: false, color: '#000000', cursor: 'default', instructions: '<p><strong class="font-semibold">Collage:</strong> Haz clic o arrastra imágenes a los recuadros. Luego, arrastra las imágenes entre recuadros para reordenarlas.</p>' }
+            };
+
+            Object.values(tools).forEach(t => t.btn.classList.remove('active'));
+            tools[tool].btn.classList.add('active');
+
+            canvasContainer.classList.toggle('hidden', !tools[tool].canvasVisible);
+            collageContainer.classList.toggle('hidden', !tools[tool].collageVisible);
+            brushControls.classList.toggle('hidden', !tools[tool].brushVisible);
+            brushControls.classList.toggle('flex', tools[tool].brushVisible);
+
+            canvas.style.cursor = tools[tool].cursor;
+            lineColorInput.value = tools[tool].color;
+            instructions.innerHTML = tools[tool].instructions;
+            
             redrawCanvas();
         }
 
-        function handleFile(file) {
+        function handleImageUpload(e) {
+            const file = e.dataTransfer ? e.dataTransfer.files[0] : e.target.files[0];
             if (!file || !file.type.match('image.*')) return;
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                backgroundImage = new Image();
-                backgroundImage.onload = () => fitCanvasToContainer();
-                backgroundImage.src = event.target.result;
+
+            if (clickedCollageZone) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    clickedCollageZone.innerHTML = '';
+                    const img = document.createElement('img');
+                    img.src = event.target.result;
+                    img.draggable = true;
+                    img.addEventListener('dragstart', (ev) => { draggedImage = ev.target; });
+                    clickedCollageZone.appendChild(img);
+                    clickedCollageZone = null;
+                };
+                reader.readAsDataURL(file);
+            } else {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    backgroundImage = new Image();
+                    backgroundImage.onload = () => fitCanvasToContainer();
+                    backgroundImage.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
             }
-            reader.readAsDataURL(file);
+            imageLoader.value = ''; // Reset file input
+        }
+
+        function handleCollageDrop(e) {
+            e.preventDefault();
+            const targetZone = e.currentTarget;
+            targetZone.classList.remove('dragover');
+
+            if (draggedImage) {
+                const sourceZone = draggedImage.parentElement;
+                if (targetZone !== sourceZone) {
+                    const targetContent = targetZone.firstElementChild;
+                    sourceZone.appendChild(targetContent);
+                    targetZone.appendChild(draggedImage);
+                }
+                draggedImage = null;
+                return;
+            }
+
+            clickedCollageZone = targetZone;
+            handleImageUpload(e);
         }
 
         function redrawCanvas() {
+            if (currentTool === 'collage') return;
             ctx.fillStyle = 'white';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -278,6 +385,7 @@
         }
 
         function onMouseDown(e) {
+            if (currentTool === 'collage') return;
             const { x, y } = getMousePos(e);
             if (currentTool === 'dimension') {
                 selectedDimension = getDimensionAt(x, y);
@@ -311,6 +419,7 @@
         }
 
         function onMouseMove(e) {
+            if (currentTool === 'collage') return;
             lastMousePosition = getMousePos(e);
 
             if (isPainting) {
@@ -342,6 +451,7 @@
         }
 
         function onMouseUp(e) {
+            if (currentTool === 'collage') return;
             if (isDrawing) {
                 if (Math.hypot(currentDimension.line.x1 - currentDimension.line.x2, currentDimension.line.y1 - currentDimension.line.y2) > 5) {
                     showInputModal('Introduce la medida', (textContent) => {
@@ -391,7 +501,6 @@
             context.fill();
         }
 
-        // Other functions (modal, drawing helpers, etc.) remain the same
         function showInputModal(title, onConfirm) { modalTitle.textContent = title; modalInputContainer.classList.remove('hidden'); modalInput.value = '100mm'; modalOverlay.classList.remove('hidden'); modalInput.focus(); modalInput.select(); modalConfirmCallback = onConfirm; }
         function showConfirmationModal(title, onConfirm) { modalTitle.textContent = title; modalInputContainer.classList.add('hidden'); modalOverlay.classList.remove('hidden'); modalConfirmCallback = onConfirm; }
         function hideModal() { modalOverlay.classList.add('hidden'); modalConfirmCallback = null; }
@@ -402,7 +511,91 @@
         function getMousePos(evt) { const rect = canvas.getBoundingClientRect(); return { x: evt.clientX - rect.left, y: evt.clientY - rect.top }; }
         function getDimensionAt(x, y) { for (let i = dimensions.length - 1; i >= 0; i--) { const dim = dimensions[i]; if (distToSegment(x, y, dim.line.x1, dim.line.y1, dim.line.x2, dim.line.y2) < 15) return dim; } return null; }
         function createTextForLine(line, textContent) { const angle = Math.atan2(line.y2 - line.y1, line.x2 - line.x1); return { text: textContent, x: (line.x1 + line.x2) / 2, y: (line.y1 + line.y2) / 2, color: line.color, angle: (angle > Math.PI / 2 || angle < -Math.PI / 2) ? angle + Math.PI : angle, }; }
-        function downloadImage() { const tempCanvas = document.createElement('canvas'); const tempCtx = tempCanvas.getContext('2d'); tempCanvas.width = 1000; tempCanvas.height = 1000; tempCtx.fillStyle = 'white'; tempCtx.fillRect(0, 0, 1000, 1000); if (backgroundImage) { const imgScale = Math.min(1000 / backgroundImage.width, 1000 / backgroundImage.height); const imgW = backgroundImage.width * imgScale; const imgH = backgroundImage.height * imgScale; const imgX = (1000 - imgW) / 2; const imgY = (1000 - imgH) / 2; tempCtx.drawImage(backgroundImage, imgX, imgY, imgW, imgH); const canvasRatio = Math.min(canvas.width / backgroundImage.width, canvas.height / backgroundImage.height); const canvasImageW = backgroundImage.width * canvasRatio; const centerShiftX = (canvas.width - canvasImageW) / 2; const centerShiftY = (canvas.height - canvasImageW * (backgroundImage.height / backgroundImage.width)) / 2; const canvasToImageScale = imgW / canvasImageW; const scaleAndShiftPoint = (p) => ({ x: (p.x - centerShiftX) * canvasToImageScale + imgX, y: (p.y - centerShiftY) * canvasToImageScale + imgY }); paintStrokes.forEach(stroke => { const scaledStroke = { ...stroke, size: stroke.size * canvasToImageScale, points: stroke.points.map(scaleAndShiftPoint) }; drawStroke(tempCtx, scaledStroke); }); dimensions.forEach(dim => { const p1 = scaleAndShiftPoint({x: dim.line.x1, y: dim.line.y1}); const p2 = scaleAndShiftPoint({x: dim.line.x2, y: dim.line.y2}); const textP = scaleAndShiftPoint({x: dim.text.x, y: dim.text.y}); const scaledLine = { ...dim.line, x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y }; const scaledText = { ...dim.text, x: textP.x, y: textP.y }; drawDimensionLine(tempCtx, scaledLine, scaledText); if(scaledText) drawText(tempCtx, scaledText); }); } const link = document.createElement('a'); link.download = 'imagen-acotada-dibujada.jpg'; link.href = tempCanvas.toDataURL('image/jpeg', 0.9); link.click(); }
+        
+        function downloadImage() {
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            const finalSize = 1000;
+            tempCanvas.width = finalSize;
+            tempCanvas.height = finalSize;
+            tempCtx.fillStyle = 'white';
+            tempCtx.fillRect(0, 0, finalSize, finalSize);
+
+            if (currentTool === 'collage') {
+                const quadrantSize = finalSize / 2;
+                const zones = [
+                    { id: 'zone-1', x: 0, y: 0 },
+                    { id: 'zone-2', x: quadrantSize, y: 0 },
+                    { id: 'zone-3', x: 0, y: quadrantSize },
+                    { id: 'zone-4', x: quadrantSize, y: quadrantSize }
+                ];
+
+                const drawPromises = zones.map(zoneInfo => {
+                    return new Promise(resolve => {
+                        const zoneElement = document.getElementById(zoneInfo.id);
+                        const imgElement = zoneElement.querySelector('img');
+                        if (imgElement && imgElement.src) {
+                            const img = new Image();
+                            img.onload = () => {
+                                tempCtx.drawImage(img, zoneInfo.x, zoneInfo.y, quadrantSize, quadrantSize);
+                                resolve();
+                            };
+                            img.onerror = () => { resolve(); };
+                            img.src = imgElement.src;
+                        } else {
+                            resolve();
+                        }
+                    });
+                });
+
+                Promise.all(drawPromises).then(() => {
+                    const link = document.createElement('a');
+                    link.download = 'collage.jpg';
+                    link.href = tempCanvas.toDataURL('image/jpeg', 0.9);
+                    link.click();
+                });
+
+            } else {
+                if (backgroundImage) {
+                    const imgScale = Math.min(finalSize / backgroundImage.width, finalSize / backgroundImage.height);
+                    const imgW = backgroundImage.width * imgScale;
+                    const imgH = backgroundImage.height * imgScale;
+                    const imgX = (finalSize - imgW) / 2;
+                    const imgY = (finalSize - imgH) / 2;
+                    tempCtx.drawImage(backgroundImage, imgX, imgY, imgW, imgH);
+
+                    const canvasRatio = Math.min(canvas.width / backgroundImage.width, canvas.height / backgroundImage.height);
+                    const canvasImageW = backgroundImage.width * canvasRatio;
+                    const centerShiftX = (canvas.width - canvasImageW) / 2;
+                    const centerShiftY = (canvas.height - canvasImageW * (backgroundImage.height / backgroundImage.width)) / 2;
+                    const canvasToImageScale = imgW / canvasImageW;
+
+                    const scaleAndShiftPoint = (p) => ({
+                        x: (p.x - centerShiftX) * canvasToImageScale + imgX,
+                        y: (p.y - centerShiftY) * canvasToImageScale + imgY
+                    });
+
+                    paintStrokes.forEach(stroke => {
+                        const scaledStroke = { ...stroke, size: stroke.size * canvasToImageScale, points: stroke.points.map(scaleAndShiftPoint) };
+                        drawStroke(tempCtx, scaledStroke);
+                    });
+
+                    dimensions.forEach(dim => {
+                        const p1 = scaleAndShiftPoint({x: dim.line.x1, y: dim.line.y1});
+                        const p2 = scaleAndShiftPoint({x: dim.line.x2, y: dim.line.y2});
+                        const textP = scaleAndShiftPoint({x: dim.text.x, y: dim.text.y});
+                        const scaledLine = { ...dim.line, x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y };
+                        const scaledText = { ...dim.text, x: textP.x, y: textP.y };
+                        drawDimensionLine(tempCtx, scaledLine, scaledText);
+                        if(scaledText) drawText(tempCtx, scaledText);
+                    });
+                }
+                const link = document.createElement('a');
+                link.download = 'imagen-editada.jpg';
+                link.href = tempCanvas.toDataURL('image/jpeg', 0.9);
+                link.click();
+            }
+        }
         function distToSegment(px, py, x1, y1, x2, y2) { const l2 = (x1 - x2) ** 2 + (y1 - y2) ** 2; if (l2 === 0) return Math.hypot(px - x1, py - y1); let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2; t = Math.max(0, Math.min(1, t)); const projX = x1 + t * (x2 - x1); const projY = y1 + t * (y2 - y1); return Math.hypot(px - projX, py - projY); }
 
         initialize();
