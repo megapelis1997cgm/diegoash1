@@ -298,10 +298,12 @@
         }
 
         function handleImageUpload(e) {
-            const file = e.dataTransfer ? e.dataTransfer.files[0] : e.target.files[0];
-            if (!file || !file.type.match('image.*')) return;
+            const files = e.dataTransfer ? e.dataTransfer.files : e.target.files;
+            if (!files || files.length === 0) return;
 
             if (clickedCollageZone) {
+                const file = files[0];
+                if (!file.type.match('image.*')) return;
                 const reader = new FileReader();
                 reader.onload = (event) => {
                     clickedCollageZone.innerHTML = '';
@@ -313,7 +315,26 @@
                     clickedCollageZone = null;
                 };
                 reader.readAsDataURL(file);
+            } else if (currentTool === 'collage') {
+                const emptyZones = Array.from(document.querySelectorAll('.collage-zone')).filter(z => !z.querySelector('img'));
+                for (let i = 0; i < Math.min(files.length, emptyZones.length); i++) {
+                    const file = files[i];
+                    const zone = emptyZones[i];
+                    if (!file.type.match('image.*')) continue;
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        zone.innerHTML = '';
+                        const img = document.createElement('img');
+                        img.src = event.target.result;
+                        img.draggable = true;
+                        img.addEventListener('dragstart', (ev) => { draggedImage = ev.target; });
+                        zone.appendChild(img);
+                    };
+                    reader.readAsDataURL(file);
+                }
             } else {
+                const file = files[0];
+                if (!file.type.match('image.*')) return;
                 const reader = new FileReader();
                 reader.onload = (event) => {
                     backgroundImage = new Image();
@@ -516,37 +537,62 @@
             const tempCanvas = document.createElement('canvas');
             const tempCtx = tempCanvas.getContext('2d');
             const finalSize = 1000;
-            tempCanvas.width = finalSize;
-            tempCanvas.height = finalSize;
-            tempCtx.fillStyle = 'white';
-            tempCtx.fillRect(0, 0, finalSize, finalSize);
 
             if (currentTool === 'collage') {
-                const quadrantSize = finalSize / 2;
-                const zones = [
-                    { id: 'zone-1', x: 0, y: 0 },
-                    { id: 'zone-2', x: quadrantSize, y: 0 },
-                    { id: 'zone-3', x: 0, y: quadrantSize },
-                    { id: 'zone-4', x: quadrantSize, y: quadrantSize }
-                ];
+                const imagesInCollage = Array.from(document.querySelectorAll('.collage-zone img'));
+                const imageCount = imagesInCollage.length;
+                let drawPromises;
 
-                const drawPromises = zones.map(zoneInfo => {
-                    return new Promise(resolve => {
-                        const zoneElement = document.getElementById(zoneInfo.id);
-                        const imgElement = zoneElement.querySelector('img');
-                        if (imgElement && imgElement.src) {
+                if (imageCount === 2) {
+                    tempCanvas.width = finalSize;
+                    tempCanvas.height = finalSize / 2;
+                    tempCtx.fillStyle = 'white';
+                    tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+                    const quadrantSize = finalSize / 2;
+                    
+                    drawPromises = imagesInCollage.map((imgElement, index) => {
+                        return new Promise(resolve => {
                             const img = new Image();
                             img.onload = () => {
-                                tempCtx.drawImage(img, zoneInfo.x, zoneInfo.y, quadrantSize, quadrantSize);
+                                tempCtx.drawImage(img, index * quadrantSize, 0, quadrantSize, quadrantSize);
                                 resolve();
                             };
-                            img.onerror = () => { resolve(); };
+                            img.onerror = () => resolve();
                             img.src = imgElement.src;
-                        } else {
-                            resolve();
-                        }
+                        });
                     });
-                });
+
+                } else { // 1, 3, or 4 images -> 2x2 layout
+                    tempCanvas.width = finalSize;
+                    tempCanvas.height = finalSize;
+                    tempCtx.fillStyle = 'white';
+                    tempCtx.fillRect(0, 0, finalSize, finalSize);
+                    const quadrantSize = finalSize / 2;
+                    const zones = [
+                        { id: 'zone-1', x: 0, y: 0 },
+                        { id: 'zone-2', x: quadrantSize, y: 0 },
+                        { id: 'zone-3', x: 0, y: quadrantSize },
+                        { id: 'zone-4', x: quadrantSize, y: quadrantSize }
+                    ];
+
+                    drawPromises = zones.map(zoneInfo => {
+                        return new Promise(resolve => {
+                            const zoneElement = document.getElementById(zoneInfo.id);
+                            const imgElement = zoneElement.querySelector('img');
+                            if (imgElement && imgElement.src) {
+                                const img = new Image();
+                                img.onload = () => {
+                                    tempCtx.drawImage(img, zoneInfo.x, zoneInfo.y, quadrantSize, quadrantSize);
+                                    resolve();
+                                };
+                                img.onerror = () => resolve();
+                                img.src = imgElement.src;
+                            } else {
+                                resolve();
+                            }
+                        });
+                    });
+                }
 
                 Promise.all(drawPromises).then(() => {
                     const link = document.createElement('a');
@@ -555,7 +601,12 @@
                     link.click();
                 });
 
-            } else {
+            } else { // Download for Dimension or Brush tool
+                tempCanvas.width = finalSize;
+                tempCanvas.height = finalSize;
+                tempCtx.fillStyle = 'white';
+                tempCtx.fillRect(0, 0, finalSize, finalSize);
+
                 if (backgroundImage) {
                     const imgScale = Math.min(finalSize / backgroundImage.width, finalSize / backgroundImage.height);
                     const imgW = backgroundImage.width * imgScale;
