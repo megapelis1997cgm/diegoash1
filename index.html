@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Convertidor de Enlaces de Google Drive</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Estilos personalizados para la fuente Inter y el cuerpo general */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5; /* Fondo gris claro */
+            display: flex;
+            justify-content: center;
+            align-items: flex-start; /* Alinear al inicio para mejor espaciado superior */
+            min-height: 100vh;
+            padding: 2rem; /* Añadir algo de relleno alrededor del contenido */
+            box-sizing: border-box; /* Incluir el relleno en el ancho y alto total del elemento */
+        }
+        /* Asegurar que las áreas de texto sean responsivas y tengan una buena altura */
+        textarea {
+            min-height: 150px; /* Altura mínima para las áreas de texto */
+            resize: vertical; /* Permitir el redimensionamiento vertical */
+        }
+        /* Estilo para el contenedor de la vista previa de la imagen */
+        #imagePreview {
+            pointer-events: none; /* Permite que los eventos del ratón pasen a través del div de vista previa */
+            transition: opacity 0.2s ease-in-out; /* Transición suave para la aparición/desaparición */
+        }
+    </style>
+</head>
+<body class="antialiased">
+    <div class="container mx-auto p-6 bg-white shadow-lg rounded-xl max-w-2xl w-full">
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">
+            Convertidor de Enlaces de Google Drive
+        </h1>
+
+        <div class="mb-6">
+            <label for="inputLinks" class="block text-gray-700 text-sm font-semibold mb-2">
+                Introduce tus enlaces de Google Drive (separados por comas o saltos de línea):
+            </label>
+            <textarea
+                id="inputLinks"
+                class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800"
+                placeholder="Ejemplo:&#10;https://drive.google.com/file/d/1916yt9Q5Kh2K7USFPbsNbh5jO2ibYe4v/view?usp=sharing,&#10;https://drive.google.com/file/d/ANOTHER_ID/view?usp=sharing"
+            ></textarea>
+        </div>
+
+        <button
+            id="convertButton"
+            class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75"
+        >
+            Convertir Enlaces
+        </button>
+
+        <div class="mt-8">
+            <label class="block text-gray-700 text-sm font-semibold mb-2">
+                Enlaces Convertidos:
+                <span id="linkCount" class="ml-2 text-blue-600 font-normal">(0 enlaces)</span>
+            </label>
+            <div id="convertedLinksContainer" class="bg-gray-50 p-3 border border-gray-300 rounded-lg min-h-[100px]">
+                <!-- Los enlaces convertidos se añadirán dinámicamente aquí -->
+                <p id="noLinksMessage" class="text-gray-500 text-center py-4">Los enlaces convertidos aparecerán aquí...</p>
+            </div>
+        </div>
+
+        <div id="messageBox" class="mt-4 p-3 rounded-lg text-sm text-center hidden">
+            <!-- Cuadro de mensaje para mostrar mensajes de éxito o error -->
+        </div>
+    </div>
+
+    <!-- Contenedor para la vista previa de la imagen flotante -->
+    <div id="imagePreview" class="absolute z-50 p-2 bg-white shadow-lg rounded-lg border border-gray-200 hidden opacity-0">
+        <img id="previewImage" class="max-w-xs max-h-48 object-contain rounded-md" src="" alt="Vista previa de imagen">
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const inputLinks = document.getElementById('inputLinks');
+            const convertedLinksContainer = document.getElementById('convertedLinksContainer');
+            const convertButton = document.getElementById('convertButton');
+            const messageBox = document.getElementById('messageBox');
+            const linkCountSpan = document.getElementById('linkCount');
+            const noLinksMessage = document.getElementById('noLinksMessage');
+            const imagePreview = document.getElementById('imagePreview');
+            const previewImage = document.getElementById('previewImage');
+
+            /**
+             * Muestra un mensaje en el cuadro de mensaje.
+             * @param {string} message - El mensaje a mostrar.
+             * @param {string} type - El tipo de mensaje ('success' o 'error').
+             */
+            function showMessage(message, type) {
+                messageBox.textContent = message;
+                messageBox.classList.remove('hidden', 'bg-green-100', 'text-green-700', 'bg-red-100', 'text-red-700');
+                if (type === 'success') {
+                    messageBox.classList.add('bg-green-100', 'text-green-700');
+                } else if (type === 'error') {
+                    messageBox.classList.add('bg-red-100', 'text-red-700');
+                }
+                // Ocultar el mensaje después de 5 segundos
+                setTimeout(() => {
+                    messageBox.classList.add('hidden');
+                }, 5000);
+            }
+
+            /**
+             * Copia el texto dado al portapapeles.
+             * @param {string} text - El texto a copiar.
+             */
+            function copyToClipboard(text) {
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.style.position = 'fixed'; // Para evitar el desplazamiento
+                textarea.style.left = '-9999px'; // Fuera de la vista
+                document.body.appendChild(textarea);
+                textarea.select();
+                try {
+                    document.execCommand('copy');
+                    showMessage('Enlace copiado al portapapeles.', 'success');
+                } catch (err) {
+                    showMessage('Error al copiar el enlace.', 'error');
+                } finally {
+                    document.body.removeChild(textarea);
+                }
+            }
+
+            /**
+             * Muestra la vista previa de la imagen.
+             * @param {string} imageUrl - La URL de la imagen para la vista previa.
+             * @param {MouseEvent} event - El evento del ratón para posicionar la vista previa.
+             */
+            function showImagePreview(imageUrl, event) {
+                // Modificar la URL para una vista previa más pequeña si es necesario
+                const previewUrl = imageUrl.replace('=w800', '=w200'); // Ejemplo: cambiar el tamaño a w200
+
+                previewImage.src = previewUrl;
+                imagePreview.classList.remove('hidden');
+                // Posicionar la vista previa cerca del cursor
+                imagePreview.style.left = `${event.clientX + 15}px`;
+                imagePreview.style.top = `${event.clientY + 15}px`;
+                // Asegurarse de que no se salga de los límites de la ventana
+                const rect = imagePreview.getBoundingClientRect();
+                if (rect.right > window.innerWidth) {
+                    imagePreview.style.left = `${event.clientX - rect.width - 15}px`;
+                }
+                if (rect.bottom > window.innerHeight) {
+                    imagePreview.style.top = `${window.innerHeight - rect.height - 15}px`;
+                }
+                setTimeout(() => {
+                    imagePreview.classList.add('opacity-100');
+                }, 10); // Pequeño retraso para la transición de opacidad
+            }
+
+            /**
+             * Oculta la vista previa de la imagen.
+             */
+            function hideImagePreview() {
+                imagePreview.classList.remove('opacity-100');
+                setTimeout(() => {
+                    imagePreview.classList.add('hidden');
+                    previewImage.src = ''; // Limpiar la fuente de la imagen
+                }, 200); // Coincide con la duración de la transición
+            }
+
+
+            convertButton.addEventListener('click', () => {
+                // Dividir por comas o saltos de línea y filtrar entradas vacías
+                const links = inputLinks.value.trim().split(/[\n,]+/).filter(link => link.trim() !== '');
+                const convertedLinks = [];
+                let errorCount = 0;
+
+                // Limpiar el contenedor de enlaces convertidos y el mensaje de no enlaces
+                convertedLinksContainer.innerHTML = '';
+                noLinksMessage.classList.add('hidden');
+
+                if (links.length === 0) {
+                    showMessage('Por favor, introduce al menos un enlace.', 'error');
+                    linkCountSpan.textContent = '(0 enlaces)';
+                    noLinksMessage.classList.remove('hidden');
+                    return;
+                }
+
+                links.forEach(link => {
+                    const trimmedLink = link.trim();
+                    const match = trimmedLink.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)\/view/);
+                    if (match && match[1]) {
+                        const fileId = match[1];
+                        // Construir el nuevo formato de URL
+                        const newLink = `https://lh3.googleusercontent.com/d/${fileId}=w800?authuser=0`;
+                        convertedLinks.push(newLink);
+                    } else {
+                        convertedLinks.push(`ERROR: Enlace inválido o no soportado: ${trimmedLink}`);
+                        errorCount++;
+                    }
+                });
+
+                // Actualizar el contador de enlaces
+                linkCountSpan.textContent = `(${convertedLinks.length} enlaces)`;
+
+                // Renderizar los enlaces convertidos con botones de copiar y vista previa
+                if (convertedLinks.length > 0) {
+                    convertedLinks.forEach(linkText => {
+                        const linkDiv = document.createElement('div');
+                        linkDiv.classList.add('flex', 'items-center', 'justify-between', 'bg-white', 'p-3', 'rounded-lg', 'shadow-sm', 'mb-2', 'break-words');
+
+                        const linkSpan = document.createElement('span');
+                        linkSpan.classList.add('text-gray-800', 'flex-1', 'mr-2');
+                        linkSpan.textContent = linkText;
+
+                        // Añadir eventos de vista previa solo si el enlace no es un error
+                        if (!linkText.startsWith('ERROR:')) {
+                            linkSpan.addEventListener('mouseover', (e) => showImagePreview(linkText, e));
+                            linkSpan.addEventListener('mouseout', hideImagePreview);
+                            linkSpan.addEventListener('mousemove', (e) => {
+                                // Actualizar la posición de la vista previa al mover el ratón
+                                if (!imagePreview.classList.contains('hidden')) {
+                                    imagePreview.style.left = `${e.clientX + 15}px`;
+                                    imagePreview.style.top = `${e.clientY + 15}px`;
+                                    const rect = imagePreview.getBoundingClientRect();
+                                    if (rect.right > window.innerWidth) {
+                                        imagePreview.style.left = `${e.clientX - rect.width - 15}px`;
+                                    }
+                                    if (rect.bottom > window.innerHeight) {
+                                        imagePreview.style.top = `${window.innerHeight - rect.height - 15}px`;
+                                    }
+                                }
+                            });
+                        }
+
+                        const copyButton = document.createElement('button');
+                        copyButton.classList.add('bg-gray-200', 'hover:bg-gray-300', 'text-gray-800', 'font-semibold', 'py-1', 'px-3', 'rounded-md', 'transition', 'duration-200', 'ease-in-out', 'ml-2');
+                        copyButton.textContent = 'Copiar';
+                        copyButton.addEventListener('click', () => copyToClipboard(linkText));
+
+                        linkDiv.appendChild(linkSpan);
+                        linkDiv.appendChild(copyButton);
+                        convertedLinksContainer.appendChild(linkDiv);
+                    });
+                } else {
+                    noLinksMessage.classList.remove('hidden');
+                }
+
+
+                if (errorCount > 0) {
+                    showMessage(`Se convirtieron ${convertedLinks.length - errorCount} enlaces. ${errorCount} enlaces tuvieron errores.`, 'error');
+                } else {
+                    showMessage('Todos los enlaces fueron convertidos exitosamente.', 'success');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
